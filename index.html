@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Flight Desk</title>
+<meta name="theme-color" content="#e9eef2">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Layout: aeronautical-chart desk. Map on top, conversation strip below; side-by-side on wide screens. */
+:root{
+  --bg:#e9eef2; --panel:#f7f9fb; --ink:#1b2a36; --muted:#5b6b78; --rule:#c9d4dc;
+  --accent:#b0247a; /* sectional-chart magenta */
+  --accent-ink:#ffffff; --ground:#3c7a5a; --warn:#b5651d; --alert:#c0352b;
+  --bubble:#dfe7ee;
+  --f-display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f1820; --panel:#15212b; --ink:#dbe5ec; --muted:#8fa1ae; --rule:#26363f;
+  --accent:#e2589f; --accent-ink:#1a0d14; --ground:#6cc196; --warn:#e3a35b; --alert:#f0786e;
+  --bubble:#1d2c38; color-scheme:dark;
+}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--f-body);
+  padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)}
+.app{height:100%;display:grid;grid-template-rows:auto minmax(220px,42%) 1fr}
+@media (min-width:900px){.app{grid-template-columns:1fr 440px;grid-template-rows:auto 1fr}
+  header{grid-column:1/3}#map{grid-row:2}.chat{grid-row:2;border-left:1px solid var(--rule)}}
+header{display:flex;align-items:center;gap:12px;
+  padding:10px max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px));
+  border-bottom:1px solid var(--rule);background:var(--panel)}
+h1{font:700 22px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;margin:0}
+h1 span{color:var(--accent)}
+.status{font:12px var(--f-mono);color:var(--muted);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+button{font:inherit;cursor:pointer}
+.icon-btn{border:1px solid var(--rule);background:transparent;color:var(--ink);border-radius:6px;padding:6px 10px;font:600 13px var(--f-body)}
+.icon-btn:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#map{min-height:0;background:var(--bubble)}
+.chat{display:flex;flex-direction:column;min-height:0;background:var(--panel)}
+.log{flex:1;overflow-y:auto;padding:14px max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:10px}
+.msg{max-width:92%;padding:9px 12px;border-radius:10px;overflow-wrap:anywhere}
+.msg.user{align-self:flex-end;background:var(--accent);color:var(--accent-ink)}
+.msg.bot{align-self:flex-start;background:var(--bubble)}
+.msg.bot p{margin:0 0 6px}.msg.bot p:last-child{margin:0}
+.msg.bot ul{margin:4px 0;padding-left:18px}
+.msg.bot code{font:13px var(--f-mono)}
+.msg.err{align-self:stretch;background:transparent;border:1px solid var(--alert);color:var(--alert);font-size:14px}
+.step{align-self:flex-start;font:12px var(--f-mono);color:var(--muted)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;padding:0 max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px))}
+.chip{border:1px solid var(--rule);background:var(--bg);color:var(--ink);border-radius:999px;padding:4px 10px;font-size:13px}
+form.ask{display:flex;gap:8px;padding:10px max(16px,env(safe-area-inset-right,0px)) 12px max(16px,env(safe-area-inset-left,0px));border-top:1px solid var(--rule)}
+form.ask input{flex:1;min-width:0;font:16px var(--f-body);padding:10px 12px;border-radius:8px;border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
+.primary{background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:10px 16px;font-weight:600}
+.primary[disabled]{opacity:.5;cursor:default}
+dialog{border:1px solid var(--rule);border-radius:12px;background:var(--panel);color:var(--ink);width:min(460px,calc(100% - 32px));padding:20px}
+dialog::backdrop{background:rgba(10,20,28,.45)}
+dialog h2{font:700 20px var(--f-display);text-transform:uppercase;letter-spacing:.04em;margin:0 0 12px}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:14px}
+.field label{font:600 12px var(--f-body);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.field input,.field select{font:15px var(--f-body);padding:9px 10px;border-radius:8px;border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
+.hint{font-size:13px;color:var(--muted);margin:0}
+.hint a{color:var(--accent)}
+.row{display:flex;gap:8px;justify-content:flex-end}
+.plane-ico{color:var(--accent);filter:drop-shadow(0 0 1px rgba(0,0,0,.5))}
+.plane-ico.mil{color:var(--warn)}.plane-ico.emg{color:var(--alert)}
+.leaflet-popup-content{font:13px/1.45 var(--f-body)}
+.pop b{font-family:var(--f-mono)}
+.pop .dat{font:12px var(--f-mono);color:#555}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Flight<span>Desk</span></h1>
+    <div class="status" id="status">Live ADS-B · adsb.lol</div>
+    <button class="icon-btn" id="settingsBtn" type="button">Settings</button>
+  </header>
+  <div id="map" aria-label="Map of aircraft"></div>
+  <section class="chat">
+    <div class="log" id="log" aria-live="polite"></div>
+    <div class="chips" id="chips">
+      <button class="chip" type="button">What's flying near me?</button>
+      <button class="chip" type="button">Military aircraft over Brazil right now</button>
+      <button class="chip" type="button">Where is flight TAM3054?</button>
+      <button class="chip" type="button">Any aircraft squawking an emergency?</button>
+    </div>
+    <form class="ask" id="ask">
+      <input id="q" type="text" autocomplete="off" placeholder="Ask about any flight, aircraft or area…" aria-label="Your question">
+      <button class="primary" id="send" type="submit">Ask</button>
+    </form>
+  </section>
+</div>
+
+<dialog id="settings">
+  <form method="dialog" id="settingsForm">
+    <h2>Settings</h2>
+    <div class="field">
+      <label for="key">Gemini API key</label>
+      <input id="key" type="password" autocomplete="off" placeholder="Paste your free key">
+      <p class="hint">Free at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Saved only in this browser.</p>
+    </div>
+    <div class="field">
+      <label for="model">Model</label>
+      <select id="model">
+        <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (stable, free)</option>
+        <option value="gemini-3-flash-preview">gemini-3-flash-preview (smarter, free)</option>
+      </select>
+      <input id="modelCustom" type="text" placeholder="…or type another model id" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="source">Flight data source</label>
+      <select id="source">
+        <option value="adsblol">adsb.lol (default)</option>
+        <option value="airplaneslive">airplanes.live</option>
+      </select>
+      <p class="hint">If one fails, the other is tried automatically. Both are free and community-run.</p>
+    </div>
+    <div class="row">
+      <button class="icon-btn" value="cancel" type="submit">Close</button>
+      <button class="primary" id="saveSettings" value="save" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+/* ---------- storage ---------- */
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem("fd_"+k); return v===null?d:v; }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem("fd_"+k, v); }catch(e){} }
+};
+const cfg = {
+  key: store.get("key",""),
+  model: store.get("model","gemini-3.1-flash-lite"),
+  source: store.get("source","adsblol")
+};
+
+/* ---------- data sources (ADSBExchange v2-compatible) ---------- */
+const SOURCES = {
+  adsblol: { name:"adsb.lol", base:"https://api.adsb.lol/v2",
+    path:{ callsign:v=>`/callsign/${v}`, hex:v=>`/hex/${v}`, registration:v=>`/reg/${v}`, type:v=>`/type/${v}`, squawk:v=>`/sqk/${v}`,
+           mil:()=>`/mil`, point:(a,o,r)=>`/point/${a}/${o}/${r}` } },
+  airplaneslive: { name:"airplanes.live", base:"https://api.airplanes.live/v2",
+    path:{ callsign:v=>`/callsign/${v}`, hex:v=>`/hex/${v}`, registration:v=>`/reg/${v}`, type:v=>`/type/${v}`, squawk:v=>`/squawk/${v}`,
+           mil:()=>`/mil`, point:(a,o,r)=>`/point/${a}/${o}/${r}` } }
+};
+// Public APIs allow about 1 request per second: queue calls.
+let lastCall = 0;
+async function throttle(){ const wait = Math.max(0, lastCall + 1100 - Date.now()); lastCall = Date.now() + wait; if(wait) await new Promise(r=>setTimeout(r,wait)); }
+async function getJSON(url, opts){
+  await throttle();
+  const r = await fetch(url, opts);
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+async function adsb(kind, ...args){
+  const order = cfg.source==="airplaneslive" ? ["airplaneslive","adsblol"] : ["adsblol","airplaneslive"];
+  let lastErr;
+  for(const id of order){
+    const s = SOURCES[id];
+    try{
+      const j = await getJSON(s.base + s.path[kind](...args.map(a=>encodeURIComponent(a))));
+      setStatus(`Live ADS-B · ${s.name}`);
+      return { data:j, source:s.name };
+    }catch(e){ lastErr = e; }
+  }
+  throw new Error("Both flight data sources failed ("+lastErr.message+"). They may be busy; try again in a minute.");
+}
+
+/* ---------- helpers ---------- */
+const R_NM = 3440.065;
+function distNm(a1,o1,a2,o2){ const t=Math.PI/180, dA=(a2-a1)*t, dO=(o2-o1)*t;
+  const h=Math.sin(dA/2)**2+Math.cos(a1*t)*Math.cos(a2*t)*Math.sin(dO/2)**2; return 2*R_NM*Math.asin(Math.sqrt(h)); }
+function slim(ac, from){
+  const o = {
+    hex: ac.hex, callsign:(ac.flight||"").trim()||null, registration: ac.r||null, type: ac.t||null,
+    description: ac.desc||null, operator: ac.ownOp||null, year: ac.year||null,
+    altitude_ft: ac.alt_baro ?? null, ground_speed_kt: ac.gs!=null?Math.round(ac.gs):null,
+    track_deg: ac.track!=null?Math.round(ac.track):null, vertical_rate_fpm: ac.baro_rate ?? ac.geom_rate ?? null,
+    squawk: ac.squawk||null, emergency: ac.emergency && ac.emergency!=="none" ? ac.emergency : null,
+    military: !!(ac.dbFlags & 1), lat: ac.lat ?? ac.lastPosition?.lat ?? null, lon: ac.lon ?? ac.lastPosition?.lon ?? null,
+    seconds_since_seen: ac.seen ?? null
+  };
+  if(from && o.lat!=null) o.distance_nm = Math.round(distNm(from.lat,from.lon,o.lat,o.lon)*10)/10;
+  for(const k in o) if(o[k]===null) delete o[k];
+  return o;
+}
+function pack(list, from, limit=40){
+  let arr = list.map(a=>slim(a,from));
+  if(from) arr.sort((a,b)=>(a.distance_nm??1e9)-(b.distance_nm??1e9));
+  const total = arr.length; arr = arr.slice(0,limit);
+  plot(arr);
+  return { count: total, shown: arr.length, aircraft: arr };
+}
+function setStatus(t){ document.getElementById("status").textContent = t; }
+
+/* ---------- map ---------- */
+const map = L.map("map",{zoomControl:true,worldCopyJump:true}).setView([-15.8,-47.9],4);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/{v}/{z}/{x}/{y}{r}.png",{
+  v: matchMedia("(prefers-color-scheme: dark)").matches ? "dark_all" : "light_all",
+  subdomains:"abcd", maxZoom:18,
+  attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a> · data: adsb.lol / airplanes.live'
+}).addTo(map);
+const acLayer = L.layerGroup().addTo(map);
+const trackLayer = L.layerGroup().addTo(map);
+const esc = s => String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function planeIcon(a){
+  const cls = "plane-ico" + (a.emergency?" emg":a.military?" mil":"");
+  return L.divIcon({className:"", iconSize:[26,26], iconAnchor:[13,13],
+    html:`<svg class="${cls}" width="26" height="26" viewBox="0 0 24 24" style="transform:rotate(${a.track_deg||0}deg)"><path fill="currentColor" d="M12 2c.8 0 1.3.9 1.3 2v5.2l7.7 4.6v2l-7.7-2.4v4.4l2.2 1.7V21L12 20l-3.5 1v-1.5l2.2-1.7v-4.4L3 15.8v-2l7.7-4.6V4c0-1.1.5-2 1.3-2z"/></svg>`});
+}
+function plot(arr){
+  acLayer.clearLayers();
+  const pts = [];
+  for(const a of arr){
+    if(a.lat==null) continue;
+    pts.push([a.lat,a.lon]);
+    const alt = a.altitude_ft==="ground" ? "on ground" : a.altitude_ft!=null ? a.altitude_ft.toLocaleString()+" ft" : "alt ?";
+    L.marker([a.lat,a.lon],{icon:planeIcon(a),title:a.callsign||a.hex}).addTo(acLayer)
+      .bindPopup(`<div class="pop"><b>${esc(a.callsign||a.hex)}</b> ${esc(a.registration||"")} ${esc(a.type||"")}<br>
+        ${esc(a.description||"")}${a.operator?"<br>"+esc(a.operator):""}<br>
+        <span class="dat">${esc(alt)} · ${a.ground_speed_kt??"?"} kt · ${a.track_deg??"?"}° · sqk ${esc(a.squawk||"?")}</span><br>
+        <a href="https://globe.adsbexchange.com/?icao=${esc(a.hex)}" target="_blank" rel="noopener">Open on ADS-B Exchange</a></div>`);
+  }
+  if(pts.length===1) map.setView(pts[0], Math.max(map.getZoom(),8));
+  else if(pts.length>1) map.fitBounds(pts,{padding:[30,30],maxZoom:10});
+}
+function plotTrack(points){
+  trackLayer.clearLayers();
+  if(points.length<2) return;
+  // split where the line jumps across the antimeridian
+  let seg=[points[0]]; const segs=[seg];
+  for(let i=1;i<points.length;i++){ if(Math.abs(points[i][1]-points[i-1][1])>180){ seg=[]; segs.push(seg);} seg.push(points[i]); }
+  const color = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+  for(const s of segs) L.polyline(s,{color,weight:3,opacity:.85}).addTo(trackLayer);
+  map.fitBounds(points,{padding:[30,30]});
+}
+
+/* ---------- tools the AI can use ---------- */
+const TOOLS = {
+  find_aircraft: {
+    description:"Find aircraft that are flying now (or were seen in the last minutes) by callsign (flight number as broadcast, e.g. TAM3054, GLO1234, UAL900), ICAO 24-bit hex (e.g. e48c01), registration (e.g. PR-XMA, N12345), ICAO type designator (e.g. A320, B738, C130) or squawk code (e.g. 7700). Returns live position, altitude, speed and aircraft details.",
+    parameters:{type:"object",properties:{
+      by:{type:"string",enum:["callsign","hex","registration","type","squawk"]},
+      value:{type:"string"},
+      near_lat:{type:"number",description:"Optional: sort results by distance from this latitude"},
+      near_lon:{type:"number"}},required:["by","value"]},
+    async run(a){
+      let v = String(a.value).trim();
+      v = a.by==="hex" ? v.toLowerCase() : v.toUpperCase();
+      if(a.by==="callsign") v = v.replace(/\s+/g,"");
+      const {data,source} = await adsb(a.by, v);
+      const from = a.near_lat!=null&&a.near_lon!=null ? {lat:+a.near_lat,lon:+a.near_lon} : null;
+      return { source, ...pack(data.ac||[], from, a.by==="type"?60:40) };
+    }},
+  aircraft_near: {
+    description:"List aircraft currently around a point, sorted by distance. Use for airports, cities or the user's location (you know coordinates of airports and cities; call get_user_location for 'near me'). Radius in nautical miles, max 250.",
+    parameters:{type:"object",properties:{lat:{type:"number"},lon:{type:"number"},radius_nm:{type:"number"},
+      only_military:{type:"boolean"},max_altitude_ft:{type:"number"},min_altitude_ft:{type:"number"}},required:["lat","lon"]},
+    async run(a){
+      const lat=+a.lat, lon=+a.lon, r=Math.min(250,Math.max(1,Math.round(+a.radius_nm||25)));
+      const {data,source} = await adsb("point", lat.toFixed(4), lon.toFixed(4), r);
+      let list = data.ac||[];
+      if(a.only_military) list = list.filter(x=>x.dbFlags&1);
+      const altOf = x=> x.alt_baro==="ground"?0:+x.alt_baro;
+      if(a.max_altitude_ft!=null) list = list.filter(x=>altOf(x)<= +a.max_altitude_ft);
+      if(a.min_altitude_ft!=null) list = list.filter(x=>altOf(x)>= +a.min_altitude_ft);
+      return { source, center:{lat,lon}, radius_nm:r, ...pack(list,{lat,lon},50) };
+    }},
+  military_aircraft: {
+    description:"List military aircraft currently tracked worldwide. Optionally filter to those within radius_nm of a point (use a country's or region's centre and a large radius, up to 3000 nm).",
+    parameters:{type:"object",properties:{lat:{type:"number"},lon:{type:"number"},radius_nm:{type:"number"}}},
+    async run(a){
+      const {data,source} = await adsb("mil");
+      let list = data.ac||[]; let from=null;
+      if(a.lat!=null&&a.lon!=null){ from={lat:+a.lat,lon:+a.lon}; const r=+a.radius_nm||1000;
+        list = list.filter(x=>x.lat!=null && distNm(from.lat,from.lon,x.lat,x.lon)<=r); }
+      return { source, ...pack(list,from,60) };
+    }},
+  get_route: {
+    description:"Look up the likely origin and destination airports for a callsign (from adsb.lol's route database, matched against the aircraft's current position). May be missing or wrong for charter, private and military flights.",
+    parameters:{type:"object",properties:{callsign:{type:"string"},lat:{type:"number"},lon:{type:"number"}},required:["callsign","lat","lon"]},
+    async run(a){
+      const body = JSON.stringify({planes:[{callsign:String(a.callsign).trim().toUpperCase(),lat:+a.lat,lng:+a.lon}]});
+      const j = await getJSON("https://api.adsb.lol/api/0/routeset",{method:"POST",headers:{"Content-Type":"application/json"},body});
+      const r = Array.isArray(j)&&j[0];
+      if(!r || !r._airports?.length) return {found:false};
+      return {found:true, callsign:r.callsign, airline:r.airline_code, route:r._airport_codes_iata||r.airport_codes,
+        plausible:r.plausible, airports:r._airports.map(p=>({iata:p.iata,icao:p.icao,name:p.name,city:p.location,country:p.countryiso2}))};
+    }},
+  get_todays_track: {
+    description:"Get the flight path flown so far today (UTC) by one aircraft, by ICAO hex. Draws it on the map and returns a summary (first/last position and time, max altitude, a sample of points). Use it for 'where has it been', 'when did it take off', 'what route did it fly'.",
+    parameters:{type:"object",properties:{hex:{type:"string"}},required:["hex"]},
+    async run(a){
+      const hex = String(a.hex).trim().toLowerCase().replace(/^~/,"");
+      const j = await getJSON(`https://adsb.lol/data/traces/${hex.slice(-2)}/trace_full_${hex}.json`);
+      const t0 = j.timestamp, tr = j.trace||[];
+      if(!tr.length) return {found:false};
+      const pts = tr.map(p=>({t:t0+p[0], lat:p[1], lon:p[2], alt:p[3], gs:p[4]}));
+      plotTrack(pts.map(p=>[p.lat,p.lon]));
+      const iso = s=>new Date(s*1000).toISOString().replace(".000Z","Z");
+      const alts = pts.map(p=>p.alt==="ground"?0:(+p.alt||0));
+      const step = Math.max(1,Math.floor(pts.length/30));
+      const sample = pts.filter((_,i)=>i%step===0||i===pts.length-1).map(p=>({time_utc:iso(p.t),lat:+p.lat.toFixed(3),lon:+p.lon.toFixed(3),alt_ft:p.alt}));
+      const ground = pts.map((p,i)=>p.alt==="ground"?i:-1).filter(i=>i>=0);
+      return {found:true, hex, registration:j.r, type:j.t, description:j.desc, points:pts.length,
+        first:{time_utc:iso(pts[0].t),lat:pts[0].lat,lon:pts[0].lon}, last:{time_utc:iso(pts.at(-1).t),lat:pts.at(-1).lat,lon:pts.at(-1).lon},
+        max_altitude_ft:Math.max(...alts), on_ground_samples:ground.length, sample};
+    }},
+  get_user_location: {
+    description:"Get the user's current location from the device (asks the user for permission). Use for 'near me', 'overhead', 'above my house'.",
+    parameters:{type:"object",properties:{}},
+    run(){ return new Promise((res,rej)=>{
+      if(!navigator.geolocation) return rej(new Error("This browser can't share location."));
+      navigator.geolocation.getCurrentPosition(p=>res({lat:+p.coords.latitude.toFixed(4),lon:+p.coords.longitude.toFixed(4),accuracy_m:Math.round(p.coords.accuracy)}),
+        e=>rej(new Error("Location not available: "+e.message)),{timeout:15000,maximumAge:60000}); }); }}
+};
+const STEP_LABEL = {find_aircraft:"Searching aircraft",aircraft_near:"Scanning the area",military_aircraft:"Listing military aircraft",
+  get_route:"Looking up the route",get_todays_track:"Loading today's track",get_user_location:"Getting your location"};
+
+/* ---------- Gemini agent ---------- */
+const SYSTEM = `You are Flight Desk, a flight-tracking assistant. You answer questions about aircraft and flights using live, unfiltered ADS-B data from community networks (adsb.lol, airplanes.live) through your tools. Always use tools for anything about current or recent flights; never invent positions.
+Guidance:
+- Aircraft you return are also drawn on the user's map automatically; mention that briefly when useful.
+- Callsigns are ICAO-style (airline ICAO code + number): LATAM Brasil flight JJ3054 broadcasts as TAM3054, GOL G31234 as GLO1234, Azul AD4000 as AZU4000, United UA900 as UAL900. Convert IATA flight numbers before searching.
+- The hex (ICAO 24-bit address) is the stable aircraft ID; callsigns change per flight. Use the hex for get_todays_track.
+- Times in data are UTC; the user's local time zone is ${Intl.DateTimeFormat().resolvedOptions().timeZone}. Convert when you state times.
+- Altitude "ground" means on the ground. Squawk 7500 = hijack, 7600 = radio failure, 7700 = emergency.
+- Gaps usually mean no receiver coverage (common over oceans and remote areas), not that the aircraft disappeared. Coverage depends on volunteer feeders.
+- If a search returns nothing, say the aircraft may not be airborne, may be outside coverage, or may use a different callsign, and suggest a next step.
+- Be concise; use short lists for multiple aircraft (callsign, type, altitude, speed, distance). Answer in the user's language.`;
+
+let history = [];
+async function gemini(contents){
+  const model = (cfg.model||"").trim() || "gemini-3.1-flash-lite";
+  const body = {
+    systemInstruction:{parts:[{text:SYSTEM}]},
+    contents,
+    tools:[{functionDeclarations:Object.entries(TOOLS).map(([name,t])=>({name,description:t.description,parameters:t.parameters}))}]
+  };
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{
+    method:"POST", headers:{"Content-Type":"application/json","x-goog-api-key":cfg.key}, body:JSON.stringify(body)});
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok){
+    const m = j.error?.message || `HTTP ${r.status}`;
+    if(r.status===429) throw new Error("Gemini's free limit was reached for now. Wait a minute and ask again, or switch model in Settings.");
+    if(r.status===400 && /API key/i.test(m)) throw new Error("Gemini rejected the API key. Check it in Settings.");
+    if(r.status===404) throw new Error(`Model "${model}" isn't available. Pick another one in Settings.`);
+    throw new Error("Gemini error: "+m);
+  }
+  const c = j.candidates?.[0]?.content;
+  if(!c) throw new Error("Gemini returned no answer"+(j.promptFeedback?.blockReason?` (${j.promptFeedback.blockReason})`:"")+".");
+  return c;
+}
+async function ask(question){
+  history.push({role:"user",parts:[{text:question}]});
+  for(let round=0; round<8; round++){
+    const content = await gemini(history);
+    content.role = "model";
+    history.push(content);                      // keep parts as-is (includes thought signatures)
+    const calls = (content.parts||[]).filter(p=>p.functionCall);
+    if(!calls.length) return (content.parts||[]).map(p=>p.text||"").join("").trim() || "(no answer)";
+    const responses = [];
+    for(const p of calls){
+      const {name,args,id} = p.functionCall;
+      addStep((STEP_LABEL[name]||name)+"…");
+      let result;
+      try{ if(!TOOLS[name]) throw new Error("Unknown tool"); result = await TOOLS[name].run(args||{}); }
+      catch(e){ result = {error:e.message}; }
+      const fr = {name, response:{result}}; if(id) fr.id = id;
+      responses.push({functionResponse:fr});
+    }
+    history.push({role:"user",parts:responses});
+  }
+  return "I needed too many steps for that one. Try asking a narrower question.";
+}
+function trimHistory(){
+  // keep the last ~12 messages, starting on a plain user text turn
+  if(history.length<=14) return;
+  let i = history.length-12;
+  while(i<history.length && !(history[i].role==="user" && history[i].parts?.[0]?.text)) i++;
+  history = history.slice(i);
+}
+
+/* ---------- chat UI ---------- */
+const log = document.getElementById("log");
+function md(s){
+  const lines = esc(s).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>").split("\n");
+  let out="", inList=false;
+  for(const l of lines){
+    const m = l.match(/^\s*[-*•]\s+(.*)/);
+    if(m){ if(!inList){out+="<ul>";inList=true;} out+=`<li>${m[1]}</li>`; continue; }
+    if(inList){out+="</ul>";inList=false;}
+    if(l.trim()) out+=`<p>${l}</p>`;
+  }
+  return out+(inList?"</ul>":"");
+}
+function add(cls, html){ const d=document.createElement("div"); d.className="msg "+cls; d.innerHTML=html; log.append(d); log.scrollTop=log.scrollHeight; return d; }
+function addStep(t){ const d=document.createElement("div"); d.className="step"; d.textContent=t; log.append(d); log.scrollTop=log.scrollHeight; }
+const form=document.getElementById("ask"), q=document.getElementById("q"), send=document.getElementById("send");
+let busy=false;
+async function submit(text){
+  text = text.trim(); if(!text||busy) return;
+  if(!cfg.key){ openSettings(); add("err","Add your free Gemini API key in Settings first."); return; }
+  busy=true; send.disabled=true; q.value="";
+  add("user", esc(text));
+  const mark = history.length;
+  try{ const a = await ask(text); add("bot", md(a)); trimHistory(); }
+  catch(e){ add("err", esc(e.message)); history = history.slice(0, mark); }
+  finally{ busy=false; send.disabled=false; q.focus(); }
+}
+form.addEventListener("submit",e=>{e.preventDefault(); submit(q.value);});
+document.getElementById("chips").addEventListener("click",e=>{ if(e.target.matches(".chip")) submit(e.target.textContent); });
+
+/* ---------- settings ---------- */
+const dlg=document.getElementById("settings");
+function openSettings(){
+  document.getElementById("key").value=cfg.key;
+  const sel=document.getElementById("model"), custom=document.getElementById("modelCustom");
+  if([...sel.options].some(o=>o.value===cfg.model)){ sel.value=cfg.model; custom.value=""; } else custom.value=cfg.model;
+  document.getElementById("source").value=cfg.source;
+  if(dlg.showModal) dlg.showModal(); else dlg.setAttribute("open","");
+}
+document.getElementById("settingsBtn").addEventListener("click",openSettings);
+document.getElementById("settingsForm").addEventListener("submit",e=>{
+  if(e.submitter?.value!=="save") return;
+  cfg.key=document.getElementById("key").value.trim();
+  cfg.model=document.getElementById("modelCustom").value.trim()||document.getElementById("model").value;
+  cfg.source=document.getElementById("source").value;
+  store.set("key",cfg.key); store.set("model",cfg.model); store.set("source",cfg.source);
+  setStatus("Live ADS-B · "+SOURCES[cfg.source].name);
+});
+
+add("bot", md(cfg.key
+  ? "Ask me about any flight, aircraft or area. I can find a flight by number or registration, list what's flying near you or an airport, show military traffic, look up routes, and draw today's track."
+  : "Welcome to Flight Desk. Open **Settings** and paste a free Gemini API key to start asking questions. Flight data comes from free community ADS-B networks."));
+if(!cfg.key) setTimeout(openSettings,400);
+</script>
+</body>
+</html>
